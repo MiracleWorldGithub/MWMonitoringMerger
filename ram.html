@@ -1,0 +1,215 @@
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.3/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<div>
+  <label for="dataset">Select a dataset:</label>
+  <select name="datasetselector" id="datasetselector" onchange="updateChart()">
+    <option value="default" disabled selected hidden>select a datasets</option>
+  </select>
+  <label for="hourrange" id="hourrangelabel">Hour range: 2 hours</label>
+  <input type="range" id="hourrange" name="hourrange" min="1" max="72" value="2" style="width: 20vw; vertical-align: middle">
+  <canvas id="myChart"></canvas>
+</div>
+
+<script>
+var time = document.getElementById("hourrange").value*3600000
+const datasetSelector = document.getElementById("datasetselector")
+
+// ms -> time
+function msToTime(duration) {
+  var milliseconds = parseInt((duration % 1000) / 100),
+    minutes = Math.floor((duration / (1000 * 60)) % 60),
+    hours = Math.floor((duration / (1000 * 60 * 60)) % 24),
+    days = Math.floor((duration / (1000 * 60 * 60 * 24)) % 365);
+
+  days = (days < 10) ? "0" + days : days;
+  hours = (hours < 10) ? "0" + hours : hours;
+  minutes = (minutes < 10) ? "0" + minutes : minutes;
+
+  if (days == "00" && hours == "00" && minutes == "00") return "0 minutes ago";
+  if (days == "00" && hours == "00") return minutes + " minutes ago";
+  if (days == "00") return hours + " hours " + minutes + " minutes ago";
+  else return days + " days " + hours + " hours " + minutes + " minutes ago";
+}
+
+function mnToTime(duration) {
+  var minutes = Math.floor(duration % 60),
+    hours = Math.floor((duration / 60) % 24),
+    days = Math.floor((duration / (60 * 24)) % 365);
+
+  days = (days < 10) ? "0" + days : days;
+  hours = (hours < 10) ? "0" + hours : hours;
+  minutes = (minutes < 10) ? "0" + minutes : minutes;
+
+  if (days == "00" && hours == "00" && minutes == "00") return "0 minutes ago";
+  if (days == "00" && hours == "00") return minutes + " minutes ago";
+  if (days == "00") return hours + " hours " + minutes + " minutes ago";
+  else return days + " days " + hours + " hours " + minutes + " minutes ago";
+}
+
+const updateDataSetSelector = () => {
+  let selected = datasetSelector.value
+  $.ajax ({
+      type: "GET",
+      url: "/api/getallserver/"+time,
+      async: false,
+      headers: {
+        "Authorization": "Basic " + btoa("MWMonitoring:MWMonitoring")
+      },
+      success: function (res){
+        if (res.indexOf(selected)==-1) {
+          datasetSelector.innerHTML = '<option value="default" disabled hidden selected>select a datasets</option>'
+        } else {datasetSelector.innerHTML = ""}
+        res.forEach(dataset => {
+          if (dataset.server == selected) {
+            datasetSelector.innerHTML = datasetSelector.innerHTML + '<option value="'+dataset.server+'" selected>'+dataset.server+'</option>'
+          } else {
+            datasetSelector.innerHTML = datasetSelector.innerHTML + '<option value="'+dataset.server+'">'+dataset.server+'</option>'
+          }
+        });
+      } 
+  });
+}
+
+var chartdata = [], labels = []
+const updateChart = () => {
+  labels = []
+  for (let i = Math.floor((time/60000)-1); i > -1; i--) {
+    labels.push(mnToTime(i))
+  }
+  chartdata1 = []
+  chartdata2 = []
+  $.ajax ({
+      type: "GET",
+      url: "/api/getserver/"+datasetSelector.value+"/"+time,
+      async: false,
+      headers: {
+        "Authorization": "Basic " + btoa("MWMonitoring:MWMonitoring")
+      },
+      success: function (res){
+        /* NaN if no value but too slow */
+        var usage = res.map((x) => {
+          x.time = msToTime(Date.now()-x.time)
+          return x
+        })
+
+        let ramarray = []
+        for (let i = Math.floor((time/60000)-1); i > -1; i--) {
+          let usedram = NaN
+          let totalram = NaN
+          if (usage.find(element => element.time == mnToTime(i))) {
+            usedram = Number(usage.find(element => element.time == mnToTime(i)).memoryused)
+            totalram = Number(usage.find(element => element.time == mnToTime(i)).memorytotal)
+          }
+          //ramarray.push(ram)
+          //if (ramarray.length > 10) {
+          //  ramarray.shift()
+          //}
+          //let sum = ramarray.reduce((a, b) => a + b, 0);
+          //let ramaverage = (sum / ramarray.length) || NaN;
+          chartdata1.push({x:mnToTime(i),y:usedram})
+          chartdata2.push({x:mnToTime(i),y:totalram})
+        }
+
+        /*chartdata = res.map((t) => {
+          let time = msToTime(Date.now()-t.time)
+          return {x:time,y:Number(t.memoryused)}
+        })*/
+
+        datasetChart.data.datasets[0].data = chartdata1
+        datasetChart.data.datasets[1].data = chartdata2
+        datasetChart.data.labels = labels
+        datasetChart.update();
+      } 
+  });
+}
+
+updateDataSetSelector()
+
+$('#hourrange').on('input', function () {
+  document.getElementById("hourrangelabel").innerHTML = "Hour range: "+document.getElementById("hourrange").value+" hours"
+});
+
+$('#hourrange').on('change', function () {
+  time = document.getElementById("hourrange").value*3600000
+  document.getElementById("hourrangelabel").innerHTML = "Hour range: "+document.getElementById("hourrange").value+" hours"
+  updateDataSetSelector()
+  if (datasetSelector.value != "default") {
+    updateChart()
+  } else {
+    datasetChart.data.datasets[0].data = []
+    datasetChart.data.labels = []
+    datasetChart.update();
+  }
+});
+</script>
+
+<script>
+  const ctx = document.getElementById('myChart');
+  const skipped = (ctx, value) => ctx.p0.skip || ctx.p1.skip ? value : undefined;
+
+  const data = {
+    //labels: ["59 minutes ago","58 minutes ago","57 minutes ago","56 minutes ago","55 minutes ago","54 minutes ago","53 minutes ago","52 minutes ago","51 minutes ago","50 minutes ago","49 minutes ago","48 minutes ago","47 minutes ago","46 minutes ago","45 minutes ago","44 minutes ago","43 minutes ago","42 minutes ago","41 minutes ago","40 minutes ago","39 minutes ago","38 minutes ago","37 minutes ago","36 minutes ago","35 minutes ago","34 minutes ago","33 minutes ago","32 minutes ago","31 minutes ago","30 minutes ago","29 minutes ago","28 minutes ago","27 minutes ago","26 minutes ago","25 minutes ago","24 minutes ago","23 minutes ago","22 minutes ago","21 minutes ago","20 minutes ago","19 minutes ago","18 minutes ago","17 minutes ago","16 minutes ago","15 minutes ago","14 minutes ago","13 minutes ago","12 minutes ago","11 minutes ago","10 minutes ago","9 minutes ago","8 minutes ago","7 minutes ago","6 minutes ago","5 minutes ago","4 minutes ago","3 minutes ago","2 minutes ago","1 minutes ago","0 minutes ago"],
+    labels: labels,
+    datasets: [{
+      label: 'RAM used',
+      //data: [{y:19,x:1677170893331}, {y:20,x:1677170953341}, {y:20,x:1677171013339}, {y:17,x:1677171073331}, {y:14,x:1677171133338}, {y:11,x:1677171193330}, {y:9,x:1677171253337}, {y:15,x:1677171313341}, {y:17,x:1677171373333}, {y:18,x:1677171433339}, {y:20,x:1677171553330}, {y:20,x:1677171613336}, {y:20,x:1677171673342}, {y:19,x:1677171733344}, {y:20,x:1677171793342}],
+      data: chartdata,
+      fill: true,
+      borderColor: "#ab3030",
+      backgroundColor: "#ab3030",
+      cubicInterpolationMode: 'monotone',
+      tension: 0.4,
+      segment: {
+        borderColor: ctx => skipped(ctx, 'rgb(0,0,0,0.2)'),
+        borderDash: ctx => skipped(ctx, [6, 6]),
+      }
+    },{
+      label: 'RAM total',
+      //data: [{y:19,x:1677170893331}, {y:20,x:1677170953341}, {y:20,x:1677171013339}, {y:17,x:1677171073331}, {y:14,x:1677171133338}, {y:11,x:1677171193330}, {y:9,x:1677171253337}, {y:15,x:1677171313341}, {y:17,x:1677171373333}, {y:18,x:1677171433339}, {y:20,x:1677171553330}, {y:20,x:1677171613336}, {y:20,x:1677171673342}, {y:19,x:1677171733344}, {y:20,x:1677171793342}],
+      data: chartdata,
+      fill: true,
+      borderColor: "#118014",
+      backgroundColor: "#118014",
+      cubicInterpolationMode: 'monotone',
+      tension: 0.4,
+      segment: {
+        borderColor: ctx => skipped(ctx, 'rgb(0,0,0,0.2)'),
+        borderDash: ctx => skipped(ctx, [6, 6]),
+      }
+    }]
+  }
+
+  const datasetChart = new Chart(ctx, {
+    type: 'line',
+    data: data,
+    options: {
+      responsive: true,
+      parsing: false,
+      animation: false,
+      interaction: {
+        mode: 'nearest',
+        axis: 'x',
+        intersect: false
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+        },
+        x: {
+          title: {
+            display: false,
+            text: 'minute'
+          },
+          ticks: {
+            maxRotation: 20,
+            autoSkip: true
+          }
+        },
+      }
+    }
+  });
+</script>
+ 

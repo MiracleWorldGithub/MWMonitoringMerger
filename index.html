@@ -1,0 +1,251 @@
+<head>
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.3/jquery.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<div>
+  <!-- datasets dropdown -->
+  <label for="dataset">Select a dataset:</label>
+  <select name="datasetselector" id="datasetselector" onchange="updateChart()">
+    <option value="default" disabled selected hidden>select a datasets</option>
+  </select>
+  <!-- time slider -->
+  <label for="hourrange" id="hourrangelabel">Hour range: 2 hours</label>
+  <input type="range" id="hourrange" name="hourrange" min="1" max="72" value="2" style="width: 20vw; vertical-align: middle">
+  <!-- chart.js div -->
+  <canvas id="myChart"></canvas>
+  <!-- possible dataset -->
+  <div>
+    <input type="checkbox" id="tps" value="tps" name="dataset">
+    <label for="tps">TPS</label>
+    <input type="checkbox" id="cpu" value="cpuusage" name="dataset">
+    <label for="cpu">CPU usage</label>
+    <input type="checkbox" id="ramused" value="memoryused" name="dataset">
+    <label for="ramused">RAM used</label>
+    <input type="checkbox" id="ramtotal" value="memorytotal" name="dataset">
+    <label for="ramtotal">RAM total</label>
+    <input type="checkbox" id="pingavg" value="pingaverage" name="dataset">
+    <label for="pingavg">PING average</label>
+    <input type="checkbox" id="pingmed" value="pingmedian" name="dataset">
+    <label for="pingmed">PING median</label>
+    <input type="checkbox" id="pingmax" value="pingmax" name="dataset">
+    <label for="pingmax">PING max</label>
+    <input type="checkbox" id="pingmin" value="pingmin" name="dataset">
+    <label for="pingmin">PING min</label>
+    <input type="checkbox" id="playeronline" value="playeronline" name="dataset">
+    <label for="playeronline">Player online</label>
+    <input type="checkbox" id="playermax" value="playermax" name="dataset">
+    <label for="playermax">Player max</label>
+  </div>
+</div>
+
+<script>
+var time = document.getElementById("hourrange").value*3600000
+const datasetSelector = document.getElementById("datasetselector")
+var selected = []
+//var selected = ["tps","playeronline","memoryused","memorytotal"]
+
+$("input[name='dataset']").change(function () {
+    selected = [];
+    $.each($("input[name='dataset']:checked"), function(){            
+      selected.push($(this).val());
+    });
+    updateChart()
+})
+
+// ms -> time
+function msToTime(duration) {
+  var milliseconds = parseInt((duration % 1000) / 100),
+    minutes = Math.floor((duration / (1000 * 60)) % 60),
+    hours = Math.floor((duration / (1000 * 60 * 60)) % 24),
+    days = Math.floor((duration / (1000 * 60 * 60 * 24)) % 365);
+
+  days = (days < 10) ? "0" + days : days;
+  hours = (hours < 10) ? "0" + hours : hours;
+  minutes = (minutes < 10) ? "0" + minutes : minutes;
+
+  if (days == "00" && hours == "00" && minutes == "00") return "0 minutes ago";
+  if (days == "00" && hours == "00") return minutes + " minutes ago";
+  if (days == "00") return hours + " hours " + minutes + " minutes ago";
+  else return days + " days " + hours + " hours " + minutes + " minutes ago";
+}
+
+// mn -> time
+function mnToTime(duration) {
+  var minutes = Math.floor(duration % 60),
+    hours = Math.floor((duration / 60) % 24),
+    days = Math.floor((duration / (60 * 24)) % 365);
+
+  days = (days < 10) ? "0" + days : days;
+  hours = (hours < 10) ? "0" + hours : hours;
+  minutes = (minutes < 10) ? "0" + minutes : minutes;
+
+  if (days == "00" && hours == "00" && minutes == "00") return "0 minutes ago";
+  if (days == "00" && hours == "00") return minutes + " minutes ago";
+  if (days == "00") return hours + " hours " + minutes + " minutes ago";
+  else return days + " days " + hours + " hours " + minutes + " minutes ago";
+}
+
+// update dropdown with available server
+const updateDataSetSelector = () => {
+  let selected = datasetSelector.value
+  // get api for available servers
+  $.ajax ({
+      type: "GET",
+      url: "/api/getallserver/"+time,
+      async: false,
+      headers: {
+        "Authorization": "Basic " + btoa("MWMonitoring:MWMonitoring")
+      },
+      success: function (res){
+        // add default option if no option are selected
+        if (res.indexOf(selected)==-1) {
+          datasetSelector.innerHTML = '<option value="default" disabled hidden selected>select a datasets</option>'
+        } else {datasetSelector.innerHTML = ""}
+        // set current selected server to selected
+        res.forEach(dataset => {
+          if (dataset.server == selected) {
+            datasetSelector.innerHTML = datasetSelector.innerHTML + '<option value="'+dataset.server+'" selected>'+dataset.server+'</option>'
+          } else {
+            datasetSelector.innerHTML = datasetSelector.innerHTML + '<option value="'+dataset.server+'">'+dataset.server+'</option>'
+          }
+        });
+      } 
+  });
+}
+
+// update chart.js with updated data
+const updateChart = () => {
+  // force add label for every minute
+  let labels = []
+  for (let i = Math.floor((time/60000)-1); i > -1; i--) {
+    labels.push(mnToTime(i))
+  }
+  datasetChart.data.labels = labels
+  // get api to get value for a specific server and time
+  $.ajax ({
+      type: "GET",
+      url: "/api/getserver/"+datasetSelector.value+"/"+time,
+      async: false,
+      headers: {
+        "Authorization": "Basic " + btoa("MWMonitoring:MWMonitoring")
+      },
+      success: function (res){
+        // map response time in ms to readable time 
+        var usage = res.map((x) => {
+          x.time = msToTime(Date.now()-x.time)
+          return x
+        })
+
+        // reset datasets, time, max chat scale and default temp data for each dataset
+        datasetChart.data.datasets = []
+        console.time("rapid")
+        let chartdata = []
+        let scalmax = 0
+        selected.forEach(dataset => {
+          chartdata[dataset] = []
+        })
+
+        // render data for chart as z: y: for every minute NaN if no data
+        for (let i = Math.floor((time/60000)); i > -1; i--) {
+          if (usage.find(x => x.time == mnToTime(i))) {
+            selected.forEach(dataset => {
+              var data = usage.find(x => x.time == mnToTime(i))[dataset]
+              if (Number(data) > Number(scalmax)) {
+                scalmax = data
+              }
+              if (!data) {
+                chartdata[dataset].push({x:mnToTime(i),y:NaN})
+              } else {
+                chartdata[dataset].push({x:mnToTime(i),y:data})
+              }
+            })
+          }
+        }
+
+        // push new dataset to chart.js dataset collection with corresponding color
+        var color = {tps:"#7d0e9e",cpuusage:"#c7c23a",memoryused:"#ab3030",memorytotal:"#3ac748",pingaverage:"#24b9c9",pingmedian:"#007a3f",pingmin:"#007002",pingmax:"#730808",playeronline:"#212121",playermax:"#949494"}
+        selected.forEach(dataset => {
+          //let color = "#" + Math.floor(Math.random()*16777215).toString(16)
+          datasetChart.data.datasets.push({
+            label: dataset,
+            data: chartdata[dataset],
+            fill: false,
+            borderColor: color[dataset],
+            backgroundColor: color[dataset],
+            cubicInterpolationMode: 'monotone',
+            tension: 0.4
+          })
+        })
+
+        // set max scale for the chart, update chart.js and time end
+        datasetChart.options.scales.y.suggestedMax = scalmax
+        datasetChart.update();
+        console.timeEnd("rapid")
+      } 
+  });
+}
+
+updateDataSetSelector()
+
+// update hours feedback for slider
+$('#hourrange').on('input', function () {
+  document.getElementById("hourrangelabel").innerHTML = "Hour range: "+document.getElementById("hourrange").value+" hours"
+});
+
+// update chart and slider data change
+$('#hourrange').on('change', function () {
+  time = document.getElementById("hourrange").value*3600000
+  updateDataSetSelector()
+  // update chart if data is not default else set all to none
+  if (datasetSelector.value != "default") {
+    updateChart()
+  } else {
+    datasetChart.data.datasets = []
+    datasetChart.data.labels = []
+    datasetChart.update();
+  }
+});
+</script>
+
+<script>
+  // create chart with chart.js with default data 
+  const ctx = document.getElementById('myChart');
+
+  const data = {
+    labels: [],
+    datasets: []
+  }
+
+  const datasetChart = new Chart(ctx, {
+    type: 'line',
+    data: data,
+    options: {
+      responsive: true,
+      parsing: false,
+      animation: false,
+      interaction: {
+        mode: 'nearest',
+        axis: 'x',
+        intersect: false
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          suggestedMin: 0
+        },
+        x: {
+          title: {
+            display: false,
+            text: 'minute'
+          },
+          ticks: {
+            maxRotation: 20,
+            autoSkip: true
+          }
+        },
+      }
+    }
+  });
+</script>
+ 

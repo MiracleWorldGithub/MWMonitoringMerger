@@ -1,0 +1,4 @@
+time,tps,cpuusage,memoryused,memorytotal,memoryfree,pingaverage,pingmedian,pingmin,pingmax,playeronline,playermax
+1677372001184,20,0,890,3072,2181,0,0,0,0,0,32
+1677372061136,20.01,0.27,469,3072,2602,0,0,0,0,0,32
+1677372121135,20,0.07,575,3072,2496,0,0,0,0,0,32
